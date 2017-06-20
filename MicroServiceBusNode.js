@@ -123,6 +123,7 @@ function MicroServiceBusNode(settings) {
     }
     // Called by HUB when itineraries has been updated
     MicroServiceBusNode.prototype.ChangeState = function (state) {
+
         self.onLog();
         //_isWaitingForSignInResponse = false;
         settings.state = state;
@@ -139,11 +140,21 @@ function MicroServiceBusNode(settings) {
         else {
             _downloadedScripts = [];
             _inboundServices = [];
-            //loadItineraries(settings.organizationId, _itineraries);
             startAllServices(_itineraries, function () {
 
             });
         }
+    }
+    // Called by HUB to enable or disable tracking
+    MicroServiceBusNode.prototype.SetTracking = function (enableTracking) {
+
+        self.onLog();
+        settings.enableTracking = enableTracking;
+        if (enableTracking)
+            self.onLog("Tracking changed to " + "Enabled".green);
+        else
+            self.onLog("Tracking changed to " + "Disabled".grey);
+
     }
     // Update debug mode
     MicroServiceBusNode.prototype.ChangeDebug = function (debug) {
@@ -172,7 +183,6 @@ function MicroServiceBusNode(settings) {
             if (response.basePath)
                 basePath = path.normalize(response.basePath + "/settings.json")
 
-            console.log('basePath:' + basePath);
             fs.writeFileSync(basePath, data);
         }
 
@@ -185,8 +195,14 @@ function MicroServiceBusNode(settings) {
         settings.debug = response.debug;
         settings.port = response.port == null ? 80 : response.port;
         settings.tags = response.tags;
+        settings.enableTracking = response.enableTracking;
 
         _comSettings = response;
+
+        if (settings.enableTracking)
+            self.onLog("Tracking: " + "Enabled".green);
+        else
+            self.onLog("Tracking: " + "Disabled".grey);
 
         if (settings.state == "Active")
             self.onLog("State: " + settings.state.green);
@@ -208,7 +224,7 @@ function MicroServiceBusNode(settings) {
         if (_firstStart) {
             _firstStart = false;
 
-            self.onLog("Protocol: " + response.protocol.green)
+            self.onLog("IoT Provider: " + response.protocol.green)
             com = new Com(settings.nodeName, response, settings.hubUri);
 
             com.OnStateReceivedCallback(function (stateMessage) {
@@ -392,11 +408,23 @@ function MicroServiceBusNode(settings) {
         });
     }
 
-    // Stopping all services
+    // Stopping COM and all services
     function stopAllServices(callback) {
-        if (com != null) {
-            com.Stop();
-        }
+
+        stopAllServicesSync();
+
+        callback();
+
+        //com.Stop(function () {
+
+        //    stopAllServicesSync();
+
+        //    callback();
+        //});
+    }
+
+    // Stopping all services
+    function stopAllServicesSync() {
         if (_startWebServer) {
             self.onLog("Server:      " + "Shutting down web server".yellow);
             server.close();
@@ -436,12 +464,31 @@ function MicroServiceBusNode(settings) {
             _downloadedScripts = [];
             _inboundServices = [];
         }
-        callback();
     }
 
     // Incoming state update
     function receiveState(newstate) {
         try {
+            if (newstate.desired.msbaction) {
+                if (newstate.desired.msbaction.action) {
+                    if (!newstate.reported || !newstate.reported.msbaction || (newstate.reported.msbaction && (newstate.desired.msbaction.id !== newstate.reported.msbaction.id))) {
+                        self.onLog("MSBACTION: ".green + newstate.desired.msbaction.action.grey);
+                        com.currentState.reported = { msbaction: com.currentState.desired.msbaction };
+                        var reportState = {
+                            reported: { msbaction: com.currentState.desired.msbaction }
+                        };
+                        com.ChangeState(reportState, settings.nodeName);
+
+                        // Wait a bit for the state to update...
+                        setTimeout(function () {
+                            performActions(com.currentState.desired.msbaction);
+                        }, 5000);
+
+                    }
+                    return;
+                }
+            }
+
             var microService = _inboundServices.find(function (i) {
                 return i.baseType === "statereceiveadapter";
             });
@@ -473,6 +520,7 @@ function MicroServiceBusNode(settings) {
             trackException(message, microService.Name, "Failed", err.name, err.message);
         }
     }
+
     // Incoming messages
     function receiveMessage(message, destination) {
         try {
@@ -607,6 +655,33 @@ function MicroServiceBusNode(settings) {
         });
     }
 
+    // Handle incomming maintinance actions
+    function performActions(msbAction) {
+        switch (msbAction.action) {
+            case 'stop':
+                self.onLog("State changed to " + "Inactive".yellow);
+                settings.state = "InActive"
+                stopAllServicesSync(function () {
+                    self.onLog("All services stopped".yellow);
+                });
+                break;
+            case 'start':
+                self.onLog("State changed to " + "Active".green);
+                settings.state = "Active"
+                _downloadedScripts = [];
+                _inboundServices = [];
+                startAllServices(_itineraries, function () { });
+                break;
+            case 'restart':
+                break;
+            case 'reboot':
+                break;
+            case 'script':
+                break;
+            default:
+        }
+    }
+
     // Called after successfull signin.
     // Iterates through all itineries and download the scripts, afterwhich the services is started
     function loadItineraries(organizationId, itineraries, callback) {
@@ -653,38 +728,39 @@ function MicroServiceBusNode(settings) {
             },
             function (err, results) {
                 // Start com to receive messages
-                if (settings.state === 'Active') {
-                    com.Start(function () {
-                        self.onLog("");
-                        self.onLog("|" + util.padLeft("", 20, '-') + "|-----------|" + util.padLeft("", 40, '-') + "|");
-                        self.onLog("|" + util.padRight("Inbound service", 20, ' ') + "|  Status   |" + util.padRight("Flow", 40, ' ') + "|");
-                        self.onLog("|" + util.padLeft("", 20, '-') + "|-----------|" + util.padLeft("", 40, '-') + "|");
+                //if (settings.state === 'Active') {
+                com.Start(function () {
+                    self.onLog("");
+                    self.onLog("|" + util.padLeft("", 20, '-') + "|-----------|" + util.padLeft("", 40, '-') + "|");
+                    self.onLog("|" + util.padRight("Inbound service", 20, ' ') + "|  Status   |" + util.padRight("Flow", 40, ' ') + "|");
+                    self.onLog("|" + util.padLeft("", 20, '-') + "|-----------|" + util.padLeft("", 40, '-') + "|");
 
-                        for (var i = 0; i < _inboundServices.length; i++) {
-                            var newMicroService = _inboundServices[i];
+                    for (var i = 0; i < _inboundServices.length; i++) {
+                        var newMicroService = _inboundServices[i];
 
-                            var serviceStatus = "Started".green;
+                        var serviceStatus = "Started".green;
+                        if (settings.state == "Active")
+                            newMicroService.Start();
+                        else
+                            serviceStatus = "Stopped".yellow;
 
-                            if (settings.state == "Active")
-                                newMicroService.Start();
-                            else
-                                serviceStatus = "Stopped".yellow;
+                        var lineStatus = "|" + util.padRight(newMicroService.Name, 20, ' ') + "| " + serviceStatus + "   |" + util.padRight(newMicroService.IntegrationName, 40, ' ') + "|";
+                        self.onLog(lineStatus);
+                    }
+                    self.onLog();
+                    self.onStarted(itineraries.length, exceptionsLoadingItineraries);
 
-                            var lineStatus = "|" + util.padRight(newMicroService.Name, 20, ' ') + "| " + serviceStatus + "   |" + util.padRight(newMicroService.IntegrationName, 40, ' ') + "|";
-                            self.onLog(lineStatus);
-                        }
-                        self.onLog();
-                        self.onStarted(itineraries.length, exceptionsLoadingItineraries);
+                    if (self.onUpdatedItineraryComplete != null)
+                        self.onUpdatedItineraryComplete();
 
-                        if (self.onUpdatedItineraryComplete != null)
-                            self.onUpdatedItineraryComplete();
+                    startListen();
 
-                        startListen();
-
-                        _loadingState = "done";
-                        callback();
-                    });
-                }
+                    _loadingState = "done";
+                    callback();
+                });
+                //}
+                //else
+                //    callback();
             });
     }
 
@@ -783,7 +859,7 @@ function MicroServiceBusNode(settings) {
                         //var newMicroService = extend(new MicroService(), reload(localFilePath));
 
                         var newMicroService = new MicroService(reload(localFilePath));
-
+                        newMicroService.NodeName = settings.nodeName;
                         newMicroService.OrganizationId = organizationId;
                         newMicroService.ItineraryId = itinerary.itineraryId;
                         newMicroService.Name = activity.userData.id;
@@ -796,6 +872,7 @@ function MicroServiceBusNode(settings) {
                         newMicroService.UseEncryption = settings.useEncryption;
                         newMicroService.ComSettings = _comSettings;
                         newMicroService.baseType = activity.userData.baseType;
+                        newMicroService.Com = com;
 
                         newMicroService.OnReceivedState(function (state, sender) {
                             com.ChangeState(state, sender);
@@ -1209,6 +1286,8 @@ function MicroServiceBusNode(settings) {
 
     // Submits tracking data to host
     function trackMessage(msg, lastActionId, status) {
+        if (!settings.enableTracking)
+            return;
 
         if (typeof msg._messageBuffer != "string") {
             msg._messageBuffer = msg._messageBuffer.toString('base64');
@@ -1292,4 +1371,4 @@ function MicroServiceBusNode(settings) {
 
 module.exports = MicroServiceBusNode;
 
-MicroServiceBusNode.DebugClient = require('./lib/DebugHost.js')
+MicroServiceBusNode.DebugClient = require('./lib/DebugHost.js');
