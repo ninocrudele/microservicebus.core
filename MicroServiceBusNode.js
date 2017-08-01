@@ -38,9 +38,9 @@ var util = require('../../lib/Utils.js');
 var MicroService = require('./lib/services/microService.js');
 var Com = require("./lib/Com.js");
 
-function MicroServiceBusNode(settings) {
+function MicroServiceBusNode(settingsHelper) {
     var self = this;
-    this.settings = settings;
+    this.settingsHelper = settingsHelper;
     // Callbacks
     this.onStarted = null;
     this.onStopped = null;
@@ -126,7 +126,7 @@ function MicroServiceBusNode(settings) {
 
         self.onLog();
         //_isWaitingForSignInResponse = false;
-        settings.state = state;
+        settingsHelper.settings.state = state;
         if (state == "Active")
             self.onLog("State changed to " + state.green);
         else
@@ -149,7 +149,7 @@ function MicroServiceBusNode(settings) {
     MicroServiceBusNode.prototype.SetTracking = function (enableTracking) {
 
         self.onLog();
-        settings.enableTracking = enableTracking;
+        settingsHelper.settings.enableTracking = enableTracking;
         if (enableTracking)
             self.onLog("Tracking changed to " + "Enabled".green);
         else
@@ -159,7 +159,7 @@ function MicroServiceBusNode(settings) {
     // Update debug mode
     MicroServiceBusNode.prototype.ChangeDebug = function (debug) {
         self.onLog("Debug state changed to ".grey + debug);
-        settings.debug = debug;
+        settingsHelper.settings.debug = debug;
 
     }
     // Incoming message from HUB
@@ -171,47 +171,48 @@ function MicroServiceBusNode(settings) {
         //_isWaitingForSignInResponse = false;
 
         if (response.sas != undefined) {
-            settings.sas = response.sas;
-            settings.debug = undefined;
-            settings.state = undefined;
-            settings.port = undefined;
-            settings.tags = undefined;
+            settingsHelper.settings.sas = response.sas;
+            settingsHelper.settings.debug = undefined;
+            settingsHelper.settings.state = undefined;
+            settingsHelper.settings.port = undefined;
+            settingsHelper.settings.tags = undefined;
 
-            var data = JSON.stringify(settings, null, "\t");
-            var basePath = path.normalize(__dirname + "/../../lib/settings.json")
+            settingsHelper.save();
+            //var data = JSON.stringify(settings, null, "\t");
+            //var basePath = path.normalize(__dirname + "/../../lib/settings.json")
 
-            if (response.basePath)
-                basePath = path.normalize(response.basePath + "/settings.json")
+            //if (response.basePath)
+            //    basePath = path.normalize(response.basePath + "/settings.json")
 
-            fs.writeFileSync(basePath, data);
+            //fs.writeFileSync(basePath, data);
         }
 
-        if (settings.debug != null && settings.debug == true) {// jshint ignore:line
-            self.onLog(settings.nodeName.gray + ' successfully logged in'.green);
+        if (settingsHelper.settings.debug != null && settingsHelper.settings.debug == true) {// jshint ignore:line
+            self.onLog(settingsHelper.settings.nodeName.gray + ' successfully logged in'.green);
         }
 
         signInResponse = response;
-        settings.state = response.state;
-        settings.debug = response.debug;
-        settings.port = response.port == null ? 80 : response.port;
-        settings.tags = response.tags;
-        settings.enableTracking = response.enableTracking;
+        settingsHelper.settings.state = response.state;
+        settingsHelper.settings.debug = response.debug;
+        settingsHelper.settings.port = response.port == null ? 80 : response.port;
+        settingsHelper.settings.tags = response.tags;
+        settingsHelper.settings.enableTracking = response.enableTracking;
 
         _comSettings = response;
 
-        if (settings.enableTracking)
+        if (settingsHelper.settings.enableTracking)
             self.onLog("Tracking: " + "Enabled".green);
         else
             self.onLog("Tracking: " + "Disabled".grey);
 
-        if (settings.state == "Active")
-            self.onLog("State: " + settings.state.green);
+        if (settingsHelper.settings.state == "Active")
+            self.onLog("State: " + settingsHelper.settings.state.green);
         else
-            self.onLog("State: " + settings.state.yellow);
+            self.onLog("State: " + settingsHelper.settings.state.yellow);
 
         _itineraries = signInResponse.itineraries;
 
-        applicationinsights.init(response.instrumentationKey, settings.nodeName)
+        applicationinsights.init(response.instrumentationKey, settingsHelper.settings.nodeName)
             .then(function (resp) {
                 if (resp)
                     self.onLog("Application Insights:" + " Successfully initiated".green);
@@ -225,7 +226,7 @@ function MicroServiceBusNode(settings) {
             _firstStart = false;
 
             self.onLog("IoT Provider: " + response.protocol.green)
-            com = new Com(settings.nodeName, response, settings.hubUri);
+            com = new Com(settingsHelper.settings.nodeName, response, settingsHelper.settings.hubUri);
 
             com.OnStateReceivedCallback(function (stateMessage) {
                 receiveState(stateMessage);
@@ -242,7 +243,7 @@ function MicroServiceBusNode(settings) {
                 self.onLog("OnSubmitError: ".red + message);
             });
             com.OnQueueDebugCallback(function (message) {
-                if (settings.debug != null && settings.debug == true) {// jshint ignore:line
+                if (settingsHelper.settings.debug != null && settingsHelper.settings.debug == true) {// jshint ignore:line
                     self.onLog("COM: ".green + message);
                 }
             });
@@ -278,33 +279,31 @@ function MicroServiceBusNode(settings) {
     }
     // Called by HUB when node has been successfully created    
     /* istanbul ignore next */
-    MicroServiceBusNode.prototype.NodeCreated = function (nodeData) {
+    MicroServiceBusNode.prototype.NodeCreated = function () {
 
-        if (nodeData.aws) {
-            fs.mkdir('./cert', function (err) {
-                if (err && err.code != 'EEXIST') {
-                    self.onLog('Unable to create cert forlder');
-                    return;
+        if (settingsHelper.settings.aws) {
+            var awsSettings = { region: settingsHelper.settings.aws.region };
+            let pemPath = path.resolve(settingsHelper.certDirectory, settingsHelper.settings.nodeName + ".cert.pem");
+            let privateKeyPath = path.resolve(settingsHelper.certDirectory, settingsHelper.settings.nodeName + ".private.key");
+            let settingsPath = path.resolve(settingsHelper.certDirectory, settingsHelper.settings.nodeName + ".settings");
+            let caRootPath = path.resolve(settingsHelper.certDirectory, ".root-ca.crt");
+
+            fs.writeFileSync(pemPath, settingsHelper.settings.aws.certificatePem);
+            fs.writeFileSync(privateKeyPath, settingsHelper.settings.aws.privateKey);
+            fs.writeFileSync(settingsPath, JSON.stringify(awsSettings));
+
+            self.onLog("AWS node certificates installed");
+
+            var caUri = "https://www.symantec.com/content/en/us/enterprise/verisign/roots/VeriSign-Class%203-Public-Primary-Certification-Authority-G5.pem";
+
+            require("request")(caUri, function (err, response, certificateContent) {
+                if (response.statusCode != 200 || err != null) {
+                    self.onLog("unable to get aws root certificate");
                 }
                 else {
-                    var awsSettings = { region: nodeData.aws.region };
-                    fs.writeFileSync("./cert/" + nodeData.nodeName + ".cert.pem", nodeData.aws.certificatePem);
-                    fs.writeFileSync("./cert/" + nodeData.nodeName + ".private.key", nodeData.aws.privateKey);
-                    fs.writeFileSync("./cert/" + nodeData.nodeName + ".settings", JSON.stringify(awsSettings));
-                    self.onLog("AWS node certificates installed");
-
-                    var caUri = "https://www.symantec.com/content/en/us/enterprise/verisign/roots/VeriSign-Class%203-Public-Primary-Certification-Authority-G5.pem";
-
-                    require("request")(caUri, function (err, response, certificateContent) {
-                        if (response.statusCode != 200 || err != null) {
-                            self.onLog("unable to get aws root certificate");
-                        }
-                        else {
-                            self.onLog("AWS root certificate installed");
-                            fs.writeFileSync("./cert/root-ca.crt", certificateContent);
-                            self.SignIn();
-                        }
-                    });
+                    self.onLog("AWS root certificate installed");
+                    fs.writeFileSync(caRootPath, certificateContent);
+                    self.SignIn();
                 }
             });
         }
@@ -325,7 +324,7 @@ function MicroServiceBusNode(settings) {
             })
         }
         // Logging in using code
-        else if (settings.nodeName == null || settings.nodeName.length == 0) { // jshint ignore:line
+        else if (settingsHelper.settings.nodeName == null || settingsHelper.settings.nodeName.length == 0) { // jshint ignore:line
             if (temporaryVerificationCode != undefined && temporaryVerificationCode.length == 0) { // jshint ignore:line
                 self.onLog('No hostname or temporary verification code has been provided.');
 
@@ -343,17 +342,17 @@ function MicroServiceBusNode(settings) {
         else {
 
             var hostData = {
-                Name: settings.nodeName,
-                machineName: settings.machineName,
-                OrganizationID: settings.organizationId,
+                Name: settingsHelper.settings.nodeName,
+                machineName: settingsHelper.settings.machineName,
+                OrganizationID: settingsHelper.settings.organizationId,
                 npmVersion: this.nodeVersion,
-                sas: settings.sas
+                sas: settingsHelper.settings.sas
             };
 
             this.onSignedIn(hostData);
 
 
-            if (settings.debug != null && settings.debug == true) {// jshint ignore:line
+            if (settingsHelper.settings.debug != null && settingsHelper.settings.debug == true) {// jshint ignore:line
                 self.onLog("Waiting for signin response".grey);
             }
         }
@@ -367,7 +366,7 @@ function MicroServiceBusNode(settings) {
         self.onLog();
         self.onLog(debug ? "Debug enabled".green : "Debug disabled".grey);
         self.onLog();
-        settings.debug = debug;
+        settingsHelper.settings.debug = debug;
     }
 
     // Events
@@ -402,7 +401,7 @@ function MicroServiceBusNode(settings) {
     // Starting up all services
     function startAllServices(itineraries, callback) {
         stopAllServices(function () {
-            loadItineraries(settings.organizationId, itineraries, function () {
+            loadItineraries(settingsHelper.settings.organizationId, itineraries, function () {
                 callback();
             });
         });
@@ -477,7 +476,7 @@ function MicroServiceBusNode(settings) {
                         var reportState = {
                             reported: { msbaction: com.currentState.desired.msbaction }
                         };
-                        com.ChangeState(reportState, settings.nodeName);
+                        com.ChangeState(reportState, settingsHelper.settings.nodeName);
 
                         // Wait a bit for the state to update...
                         setTimeout(function () {
@@ -547,7 +546,7 @@ function MicroServiceBusNode(settings) {
                     };
 
                     // Call startServiceAsync to initilized and start the service.
-                    startServiceAsync(intineratyActivity, settings.organizationId, true, function () {
+                    startServiceAsync(intineratyActivity, settingsHelper.settings.organizationId, true, function () {
                         self.onLog("");
                         self.onLog("|" + util.padLeft("", 20, '-') + "|-----------|" + util.padLeft("", 40, '-') + "|");
                         self.onLog("|" + util.padRight("Inbound service", 20, ' ') + "|  Status   |" + util.padRight("Flow", 40, ' ') + "|");
@@ -616,14 +615,11 @@ function MicroServiceBusNode(settings) {
 
     // Restore persisted messages from ./persist folder
     function restorePersistedMessages() {
-        var persistPath = rootFolder + '/persist/';
-        if (!fs.existsSync(persistPath))
-            fs.mkdirSync(persistPath);
 
-        fs.readdir(persistPath, function (err, files) {
+        fs.readdir(settingsHelper.persistDirectory, function (err, files) {
             if (err) throw err;
             for (var i = 0; i < files.length; i++) {
-                var file = persistPath + files[i];
+                var file = path.resolve(persistDirectory, files[i]);
                 try {
 
                     var persistMessage = JSON.parse(fs.readFileSync(file, 'utf8'));
@@ -660,14 +656,14 @@ function MicroServiceBusNode(settings) {
         switch (msbAction.action) {
             case 'stop':
                 self.onLog("State changed to " + "Inactive".yellow);
-                settings.state = "InActive"
+                settingsHelper.settings.state = "InActive"
                 stopAllServicesSync(function () {
                     self.onLog("All services stopped".yellow);
                 });
                 break;
             case 'start':
                 self.onLog("State changed to " + "Active".green);
-                settings.state = "Active"
+                settingsHelper.settings.state = "Active"
                 _downloadedScripts = [];
                 _inboundServices = [];
                 startAllServices(_itineraries, function () { });
@@ -702,14 +698,14 @@ function MicroServiceBusNode(settings) {
                     if (itinerary.activities[i].userData.config != undefined) {
                         var host = itinerary.activities[i].userData.config.generalConfig.find(function (c) { return c.id === 'host'; }).value;
 
-                        if (host == settings.nodeName) {
+                        if (host == settingsHelper.settings.nodeName) {
                             intineratyActivities.push({ itinerary: itinerary, activity: itinerary.activities[i] });
                         }
-                        else if (settings.tags !== undefined) {
-                            var tags = settings.tags.find(function (tag) { return tag === host });
+                        else if (settingsHelper.settings.tags !== undefined) {
+                            var tags = settingsHelper.settings.tags.find(function (tag) { return tag === host });
                             if (tags !== undefined && tags.length > 0) {
                                 if (itinerary.activities[i].userData.baseType === 'onewayreceiveadapter' || itinerary.activities[i].userData.baseType === 'twowayreceiveadapter') {
-                                    itinerary.activities[i].userData.config.generalConfig.find(function (c) { return c.id === 'host'; }).value = settings.nodeName;
+                                    itinerary.activities[i].userData.config.generalConfig.find(function (c) { return c.id === 'host'; }).value = settingsHelper.settings.nodeName;
                                 }
                                 intineratyActivities.push({ itinerary: itinerary, activity: itinerary.activities[i] });
                             }
@@ -728,7 +724,7 @@ function MicroServiceBusNode(settings) {
             },
             function (err, results) {
                 // Start com to receive messages
-                //if (settings.state === 'Active') {
+                //if (settingsHelper.settings.state === 'Active') {
                 com.Start(function () {
                     self.onLog("");
                     self.onLog("|" + util.padLeft("", 20, '-') + "|-----------|" + util.padLeft("", 40, '-') + "|");
@@ -739,7 +735,7 @@ function MicroServiceBusNode(settings) {
                         var newMicroService = _inboundServices[i];
 
                         var serviceStatus = "Started".green;
-                        if (settings.state == "Active")
+                        if (settingsHelper.settings.state == "Active")
                             newMicroService.Start();
                         else
                             serviceStatus = "Stopped".yellow;
@@ -787,16 +783,16 @@ function MicroServiceBusNode(settings) {
                         var isEnabled = activity.userData.config.generalConfig.find(function (c) { return c.id === 'enabled'; }).value;
 
                         var hosts = host.split(',');
-                        var a = hosts.indexOf(settings.nodeName);
+                        var a = hosts.indexOf(settingsHelper.settings.nodeName);
 
-                        if (hosts.indexOf(settings.nodeName) < 0 && !forceStart) {
+                        if (hosts.indexOf(settingsHelper.settings.nodeName) < 0 && !forceStart) {
                             done();
                             return;
                         }
 
                         var scriptFileUri = activity.userData.isCustom == true ?
-                            settings.hubUri + '/api/Scripts/' + settings.organizationId + "/" + activity.userData.type + '.js' :
-                            settings.hubUri + '/api/Scripts/' + activity.userData.type + '.js';
+                            settingsHelper.settings.hubUri + '/api/Scripts/' + settingsHelper.settings.organizationId + "/" + activity.userData.type + '.js' :
+                            settingsHelper.settings.hubUri + '/api/Scripts/' + activity.userData.type + '.js';
                         scriptFileUri = scriptFileUri.replace('wss://', 'https://');
 
                         var integrationId = activity.userData.integrationId;
@@ -835,7 +831,7 @@ function MicroServiceBusNode(settings) {
                                     done();
                                 }
                                 else {
-                                    var localFilePath = __dirname + "/lib/services/" + scriptfileName;
+                                    var localFilePath = path.resolve(settingsHelper.serviceDirectory, scriptfileName);
                                     fs.writeFileSync(localFilePath, scriptContent);
                                     _downloadedScripts.push({ name: scriptfileName });
                                     callback(null, localFilePath, integrationId, scriptfileName);
@@ -859,7 +855,7 @@ function MicroServiceBusNode(settings) {
                         //var newMicroService = extend(new MicroService(), reload(localFilePath));
 
                         var newMicroService = new MicroService(reload(localFilePath));
-                        newMicroService.NodeName = settings.nodeName;
+                        newMicroService.NodeName = settingsHelper.settings.nodeName;
                         newMicroService.OrganizationId = organizationId;
                         newMicroService.ItineraryId = itinerary.itineraryId;
                         newMicroService.Name = activity.userData.id;
@@ -869,7 +865,7 @@ function MicroServiceBusNode(settings) {
                         newMicroService.Environment = itinerary.environment;
                         newMicroService.TrackingLevel = itinerary.trackingLevel;
                         newMicroService.Init(activity.userData.config);
-                        newMicroService.UseEncryption = settings.useEncryption;
+                        newMicroService.UseEncryption = settingsHelper.settings.useEncryption;
                         newMicroService.ComSettings = _comSettings;
                         newMicroService.baseType = activity.userData.baseType;
                         newMicroService.Com = com;
@@ -880,7 +876,7 @@ function MicroServiceBusNode(settings) {
                         // Eventhandler for messages sent back from the service
                         newMicroService.OnMessageReceived(function (integrationMessage, sender) {
                             try {
-                                integrationMessage.OrganizationId = settings.organizationId;
+                                integrationMessage.OrganizationId = settingsHelper.settings.organizationId;
 
                                 if (integrationMessage.FaultCode != null) {
                                     trackException(integrationMessage,
@@ -899,7 +895,7 @@ function MicroServiceBusNode(settings) {
                                 var successors = getSuccessors(integrationMessage);
 
                                 successors.forEach(function (successor) {
-                                    integrationMessage.Sender = settings.nodeName;
+                                    integrationMessage.Sender = settingsHelper.settings.nodeName;
 
                                     // No correlation
                                     try {
@@ -914,7 +910,7 @@ function MicroServiceBusNode(settings) {
                                         destination.split(',').forEach(function (destinationNode) {
 
                                             // Encrypt?
-                                            if (settings.useEncryption == true) {
+                                            if (settingsHelper.settings.useEncryption == true) {
                                                 var messageBuffer = new Buffer(integrationMessage._messageBuffer, 'base64');
                                                 messageBuffer = util.encrypt(messageBuffer);
                                                 integrationMessage.Encrypted = true;
@@ -922,7 +918,7 @@ function MicroServiceBusNode(settings) {
                                                 // integrationMessage.MessageBuffer = messageBuffer;
                                             }
 
-                                            if (destinationNode == settings.nodeName)
+                                            if (destinationNode == settingsHelper.settings.nodeName)
                                                 receiveMessage(integrationMessage, successor.userData.id);
                                             else {
                                                 if (typeof integrationMessage._messageBuffer != "string") {
@@ -955,7 +951,7 @@ function MicroServiceBusNode(settings) {
                         });
                         // Eventhandler for any debug information sent back from the service
                         newMicroService.OnDebug(function (source, info) {
-                            if (settings.debug != null && settings.debug == true) {// jshint ignore:line
+                            if (settingsHelper.settings.debug != null && settingsHelper.settings.debug == true) {// jshint ignore:line
                                 self.onLog("DEBUG: ".green + '['.gray + source.gray + ']'.gray + '=>'.green + info);
                                 applicationinsights.trackEvent("Tracking", { service: source, state: info });
                             }
@@ -1073,24 +1069,15 @@ function MicroServiceBusNode(settings) {
             return;
 
         try {
-            if (settings.port != undefined)
-                port = settings.port;
+            if (settingsHelper.settings.port != undefined)
+                port = settingsHelper.settings.port;
 
-            self.onLog("Listening to port: " + settings.port);
+            self.onLog("Listening to port: " + settingsHelper.settings.port);
             self.onLog();
 
             //app.use(bodyParser.json());
 
             server = http.createServer(app);
-
-            /*
-            generateSwagger();
-            
-            app.use(swaggerize({
-                api: require(rootFolder + '/swagger.json'),
-                docspath: '/swagger/docs/v1'
-            }));
-            */
 
             // parse application/x-www-form-urlencoded
             app.use(bodyParser.urlencoded({ extended: false }))
@@ -1101,7 +1088,7 @@ function MicroServiceBusNode(settings) {
             app.use(function (req, res) {
                 res.header('Content-Type', 'text/html');
                 var response = '<style>body {font-family: "Helvetica Neue",Helvetica,Arial,sans-serif; background: rgb(52, 73, 94); color: white;}</style>';
-                response += '<h1><img src="https://microservicebus.com/Images/Logotypes/Logo6.svg" style="height:75px"/> Welcome to the ' + settings.nodeName + ' node</h1><h2 style="margin-left: 80px">API List</h2>';
+                response += '<h1><img src="https://microservicebus.com/Images/Logotypes/Logo6.svg" style="height:75px"/> Welcome to the ' + settingsHelper.settings.nodeName + ' node</h1><h2 style="margin-left: 80px">API List</h2>';
 
                 app._router.stack.forEach(function (endpoint) {
                     if (endpoint.route != undefined) {
@@ -1158,49 +1145,6 @@ function MicroServiceBusNode(settings) {
         }
         catch (e) {
             self.onLog('Unable to start listening on port ' + port);
-        }
-    }
-
-    // Create a swagger file
-    function generateSwagger() {
-        // Load template
-        try {
-            var data = fs.readFileSync(__dirname + '/swaggerTemplate.json');
-            var swagger = JSON.parse(data);
-            data = fs.readFileSync(__dirname + '/swaggerPathTemplate.json');
-            var pathTemplate = JSON.parse(data);
-
-            for (var i = 0; i < app._router.stack.length; i++) {
-                var endpoint = app._router.stack[i];
-                if (endpoint["route"] != undefined) {
-
-                    if (swagger.paths[endpoint.route.path] == undefined)
-                        swagger.paths[endpoint.route.path] = {};
-
-                    if (endpoint.route.methods.get) {
-                        swagger.paths[endpoint.route.path].get = pathTemplate['get']
-                    }
-                    if (endpoint.route.methods.delete) {
-                        swagger.paths[endpoint.route.path].delete = pathTemplate['delete']
-                    }
-                    if (endpoint.route.methods.post) {
-                        swagger.paths[endpoint.route.path].post = pathTemplate['post']
-                    }
-                    if (endpoint.route.methods.put) {
-                        swagger.paths[endpoint.route.path].put = pathTemplate['put']
-                    }
-                }
-            }
-            swagger["host"] = "localhost:" + port;
-            var swaggerData = JSON.stringify(swagger);
-
-            fs.writeFileSync(__dirname + '/swagger.json', swaggerData);
-
-        }
-        catch (err) {
-            self.onLog('Invalid swagger file.'.red);
-            self.onLog(JSON.stringify(err).red);
-            process.abort();
         }
     }
 
@@ -1286,23 +1230,21 @@ function MicroServiceBusNode(settings) {
 
     // Submits tracking data to host
     function trackMessage(msg, lastActionId, status) {
-        if (!settings.enableTracking)
+        if (!settingsHelper.settings.enableTracking)
             return;
 
         if (typeof msg._messageBuffer != "string") {
             msg._messageBuffer = msg._messageBuffer.toString('base64');
-            // msg.MessageBuffer = msg._messageBuffer;
         }
 
         var time = moment();
-        var utcNow = time.utc().format('YYYY-MM-DD HH:mm:ss.SSSZ');
         var messageId = guid.v1();
 
         if (msg.IsFirstAction && status == "Completed")
             msg.IsFirstAction = false;
 
         // Remove message if encryption is enabled?
-        if (settings.useEncryption == true) {
+        if (settingsHelper.settings.useEncryption == true) {
             msg._messageBuffer = new Buffer("[ENCRYPTED]").toString('base64');
         }
 
@@ -1311,9 +1253,9 @@ function MicroServiceBusNode(settings) {
             ContentType: msg.ContentType,
             LastActivity: lastActionId,
             NextActivity: null,
-            Node: settings.nodeName,
+            Node: settingsHelper.settings.nodeName,
             MessageId: messageId,
-            OrganizationId: settings.organizationId,
+            OrganizationId: settingsHelper.settings.organizationId,
             InterchangeId: msg.InterchangeId,
             ItineraryId: msg.ItineraryId,
             IntegrationName: msg.IntegrationName,
@@ -1321,11 +1263,11 @@ function MicroServiceBusNode(settings) {
             TrackingLevel: msg.TrackingLevel,
             IntegrationId: msg.IntegrationId,
             IsFault: false,
-            IsEncrypted: settings.useEncryption == true,
+            IsEncrypted: settingsHelper.settings.useEncryption == true,
             FaultCode: msg.FaultCode,
             FaultDescription: msg.FaultDescripton,
             IsFirstAction: msg.IsFirstAction,
-            TimeStamp: utcNow,
+            TimeStamp: time.utc().toISOString(),
             State: status,
             Variables: msg.Variables
         };
@@ -1337,7 +1279,6 @@ function MicroServiceBusNode(settings) {
     function trackException(msg, lastActionId, status, fault, faultDescription) {
 
         var time = moment();
-        var utcNow = time.utc().format('YYYY-MM-DD HH:mm:ss.SSS');
         var messageId = guid.v1();
 
         var trackingMessage =
@@ -1346,10 +1287,10 @@ function MicroServiceBusNode(settings) {
                 ContentType: msg.ContentType,
                 LastActivity: lastActionId,
                 NextActivity: null,
-                Node: settings.nodeName,
+                Node: settingsHelper.settings.nodeName,
                 MessageId: messageId,
                 Variables: null,
-                OrganizationId: settings.organizationId,
+                OrganizationId: settingsHelper.settings.organizationId,
                 IntegrationName: msg.IntegrationName,
                 Environment: msg.Environment,
                 TrackingLevel: msg.TrackingLevel,
@@ -1359,7 +1300,7 @@ function MicroServiceBusNode(settings) {
                 FaultCode: msg.FaultCode,
                 FaultDescription: msg.FaultDescripton,
                 IsFirstAction: msg.IsFirstAction,
-                TimeStamp: utcNow,
+                TimeStamp: time.utc().toISOString(),
                 IsFault: true,
                 State: status
             };
