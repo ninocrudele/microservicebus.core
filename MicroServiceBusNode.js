@@ -22,7 +22,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 'use strict';
-var colors = require('colors');
+
 var moment = require('moment');
 var extend = require('extend');
 var async = require('async');
@@ -34,7 +34,7 @@ var guid = require('uuid');
 var pjson = require('./package.json');
 var keypress = require('keypress');
 var Applicationinsights = require("./lib/Applicationinsights.js");
-var util = require('../../lib/Utils.js');
+var util = require('./lib/Utils.js');
 var MicroService = require('./lib/services/microService.js');
 var Com = require("./lib/Com.js");
 
@@ -127,10 +127,14 @@ function MicroServiceBusNode(settingsHelper) {
         self.onLog();
         //_isWaitingForSignInResponse = false;
         settingsHelper.settings.state = state;
-        if (state == "Active")
-            self.onLog("State changed to " + state.green);
-        else
-            self.onLog("State changed to " + state.yellow);
+        if (state == "Active") {
+            self.onLog("State:".white + state.green);
+            self.onLog();
+        }
+        else {
+            self.onLog("State:".white + state.yellow);
+            self.onLog();
+        }
 
         if (state != "Active") {
             stopAllServices(function () {
@@ -148,17 +152,16 @@ function MicroServiceBusNode(settingsHelper) {
     // Called by HUB to enable or disable tracking
     MicroServiceBusNode.prototype.SetTracking = function (enableTracking) {
 
-        self.onLog();
         settingsHelper.settings.enableTracking = enableTracking;
         if (enableTracking)
-            self.onLog("Tracking changed to " + "Enabled".green);
+            self.onLog("Tracking: ".white + "enabled".green);
         else
-            self.onLog("Tracking changed to " + "Disabled".grey);
+            self.onLog("Tracking: ".white + "disabled".yellow);
 
     }
     // Update debug mode
     MicroServiceBusNode.prototype.ChangeDebug = function (debug) {
-        self.onLog("Debug state changed to ".grey + debug);
+        self.onLog("Debug: ".white + debug);
         settingsHelper.settings.debug = debug;
 
     }
@@ -226,7 +229,7 @@ function MicroServiceBusNode(settingsHelper) {
             _firstStart = false;
 
             self.onLog("IoT Provider: " + response.protocol.green)
-            com = new Com(settingsHelper.settings.nodeName, response, settingsHelper.settings.hubUri);
+            com = new Com(settingsHelper.settings.nodeName, response, settingsHelper.settings.hubUri, settingsHelper);
 
             com.OnStateReceivedCallback(function (stateMessage) {
                 receiveState(stateMessage);
@@ -363,9 +366,9 @@ function MicroServiceBusNode(settingsHelper) {
     }
 
     MicroServiceBusNode.prototype.SetDebug = function (debug) {
-        self.onLog();
-        self.onLog(debug ? "Debug enabled".green : "Debug disabled".grey);
-        self.onLog();
+
+        self.onLog(debug ? "Debug: ".white + "enabled".green : "Debug: ".white + "disabled".yellow);
+
         settingsHelper.settings.debug = debug;
     }
 
